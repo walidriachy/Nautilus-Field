@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Neural Field — Nautilus Live</title>
+<style>
+  :root{
+    --bg:#000; --panel:rgba(10,12,18,.72); --stroke:rgba(120,140,180,.18);
+    --ink:#e8edf6; --dim:#7d8aa3; --accent:#ff4d5e;
+    --live:#37e0a0; --demo:#e0b23a;
+    --mono:"SFMono-Regular",ui-monospace,"JetBrains Mono","Cascadia Code",Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:var(--mono);overflow:hidden;-webkit-font-smoothing:antialiased}
+  canvas{display:block;position:fixed;inset:0;touch-action:none;cursor:grab}
+  canvas.drag{cursor:grabbing}
+  .hud{position:fixed;z-index:5;pointer-events:none}
+  .top{top:0;left:0;right:0;display:flex;justify-content:space-between;
+    align-items:flex-start;padding:14px 16px;gap:12px}
+  .title{font-weight:700;letter-spacing:.14em;font-size:13px;text-transform:uppercase}
+  .title .sub{display:block;color:var(--dim);font-weight:500;font-size:10px;
+    letter-spacing:.22em;margin-top:3px}
+  .pill{pointer-events:auto;display:flex;align-items:center;gap:7px;padding:6px 10px;
+    border:1px solid var(--stroke);border-radius:999px;background:var(--panel);
+    font-size:10px;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap}
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--demo);
+    box-shadow:0 0 8px var(--demo)}
+  .pill.on .dot{background:var(--live);box-shadow:0 0 9px var(--live)}
+  .pill .rate{color:var(--dim)}
+
+  .panel{pointer-events:auto;background:var(--panel);border:1px solid var(--stroke);
+    border-radius:10px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+  .controls{position:fixed;z-index:5;left:16px;bottom:52px;padding:10px 10px 12px;
+    width:250px;display:flex;flex-direction:column;gap:9px}
+  .controls.collapsed{width:auto}.controls.collapsed .body{display:none}
+  .row{display:flex;align-items:center;gap:8px}
+  .row.head{justify-content:space-between}
+  .lbl{font-size:9.5px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;white-space:nowrap}
+  .seg{display:flex;border:1px solid var(--stroke);border-radius:7px;overflow:hidden;flex:1}
+  .seg button{flex:1;appearance:none;border:0;background:transparent;color:var(--dim);
+    font-family:inherit;font-size:9.5px;letter-spacing:.04em;padding:6px 3px;cursor:pointer;
+    text-transform:uppercase;transition:background .15s,color .15s}
+  .seg button.on{background:rgba(255,255,255,.10);color:var(--ink)}
+  .seg button:hover{color:var(--ink)}
+  input[type=range]{flex:1;appearance:none;height:3px;border-radius:3px;background:rgba(255,255,255,.16);outline:none}
+  input[type=range]::-webkit-slider-thumb{appearance:none;width:12px;height:12px;border-radius:50%;
+    background:var(--ink);cursor:pointer;border:2px solid #0b0d13}
+  input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:var(--ink);
+    cursor:pointer;border:2px solid #0b0d13}
+  input[type=text]{flex:1;min-width:0;background:rgba(255,255,255,.05);border:1px solid var(--stroke);
+    border-radius:6px;color:var(--ink);font-family:inherit;font-size:10px;padding:6px 7px;outline:none}
+  input[type=text]:focus{border-color:rgba(120,140,180,.5)}
+  .btn{appearance:none;font-family:inherit;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--ink);background:rgba(255,255,255,.06);border:1px solid var(--stroke);border-radius:7px;
+    padding:7px 9px;cursor:pointer;transition:background .15s}
+  .btn:hover{background:rgba(255,255,255,.13)}
+  .btn.go{border-color:rgba(55,224,160,.4);color:#bff5e0}
+  .toggle{cursor:pointer;color:var(--dim);font-size:11px;letter-spacing:.1em;user-select:none}
+  .feed{position:fixed;left:0;right:0;bottom:0;z-index:5;height:26px;display:flex;align-items:center;
+    gap:10px;padding:0 14px;border-top:1px solid var(--stroke);
+    background:linear-gradient(0deg,rgba(0,0,0,.85),rgba(0,0,0,0));font-size:10px;letter-spacing:.12em;
+    color:var(--dim);overflow:hidden;white-space:nowrap}
+  .feed .dot{width:6px;height:6px;border-radius:50%;background:var(--demo);flex:none;box-shadow:0 0 8px var(--demo)}
+  .feed.on .dot{background:var(--live);box-shadow:0 0 8px var(--live)}
+  .feed .scroll{display:inline-block;will-change:transform}
+  .hint{position:fixed;right:16px;bottom:52px;z-index:5;text-align:right;color:var(--dim);
+    font-size:9.5px;letter-spacing:.12em;line-height:1.7;opacity:.8}
+  @media (max-width:600px){.controls{bottom:44px;width:214px}.hint{display:none}}
+  @media (prefers-reduced-motion: reduce){ .feed .scroll{animation:none!important} }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div class="hud top">
+  <div class="title" id="title">INSIDE&nbsp;AI<span class="sub" id="subtitle">FEED-FORWARD ORGANISM</span></div>
+  <div class="pill" id="pill"><span class="dot"></span><span id="pillText">DEMO</span><span class="rate" id="pillRate"></span></div>
+</div>
+
+<div class="panel controls" id="controls">
+  <div class="row head"><span class="lbl">Neural Field</span><span class="toggle" id="collapse">–</span></div>
+  <div class="body">
+    <div class="row"><span class="lbl">Skin</span>
+      <div class="seg" id="skin">
+        <button data-v="live" class="on">Live</button>
+        <button data-v="organism">Organism</button>
+        <button data-v="feedfwd">Feed</button>
+        <button data-v="transformer">Trans</button>
+      </div>
+    </div>
+    <div class="row"><span class="lbl">Nautilus WS</span>
+      <input id="wsurl" type="text" spellcheck="false" value="ws://127.0.0.1:8765" /></div>
+    <div class="row"><button class="btn go" id="connect">Connect</button>
+      <button class="btn" id="regen">Regen</button></div>
+    <div class="row"><span class="lbl">Wave</span><input id="wave" type="range" min="0" max="100" value="42" /></div>
+    <div class="row"><span class="lbl">Density</span><input id="density" type="range" min="10" max="100" value="72" /></div>
+    <div class="row"><span class="lbl">Glow</span><input id="glow" type="range" min="4" max="100" value="34" /></div>
+    <div class="row"><button class="btn" id="orbit">Auto-orbit ●</button>
+      <button class="btn" id="demo">Demo feed ●</button></div>
+  </div>
+</div>
+
+<div class="hint">drag&nbsp;·&nbsp;orbit&nbsp;|&nbsp;scroll&nbsp;·&nbsp;zoom<br/>R&nbsp;regen&nbsp;|&nbsp;Space&nbsp;orbit</div>
+
+<div class="feed" id="feedBar"><span class="dot"></span><span class="scroll" id="feed"></span></div>
+
+<script>
+"use strict";
+/* ============================================================================
+   NEURAL FIELD  ·  NautilusTrader live edition
+   Curved-edge neural net with additive glow. A WebSocket feed from a
+   NautilusTrader Actor bridge drives it: each market-data event pulses the input
+   layer, the pulse propagates forward through the layers (layerCharge), trades
+   tint hue by aggressor side, order/position events light the execution layer.
+   With no socket attached it runs a synthetic demo feed so it always looks alive.
+   ========================================================================== */
+
+const cv = document.getElementById("c");
+const ctx = cv.getContext("2d", { alpha:false });
+let W=0,H=0,DPR=1;
+function resize(){DPR=Math.min(window.devicePixelRatio||1,2);W=innerWidth;H=innerHeight;
+  cv.width=Math.floor(W*DPR);cv.height=Math.floor(H*DPR);cv.style.width=W+"px";cv.style.height=H+"px";}
+addEventListener("resize",resize);resize();
+
+/* ---- skins --------------------------------------------------------------- */
+const SKINS = {
+  live:{ title:"NAUTILUS FIELD", sub:"LIVE ORDER-FLOW PIPELINE",
+    feed:"AWAITING NAUTILUS STREAM \u2014 start the Actor bridge, then Connect  ::  ",
+    layers:[
+      {name:"Feed",       act:"ticks",   n:16, hue:190, role:"input"},
+      {name:"Features",   act:"ReLU",    n:26, hue:170},
+      {name:"Alpha",      act:"tanh",    n:20, hue:150},
+      {name:"Risk",       act:"clip",    n:14, hue:44},
+      {name:"Execution",  act:"orders",  n:10, hue:8,  role:"exec"},
+    ], sat:0.85, lum:0.6 },
+  organism:{ title:"INSIDE AI", sub:"FEED-FORWARD ORGANISM",
+    feed:"LIVE FEED \u2014 ORGANISMUS STABIL  ::  emergence 0.83  ::  coherence 0.91  ::  ",
+    layers:[
+      {name:"Sensoren",            act:"INPUT", n:14, hue:205, role:"input"},
+      {name:"HL 1 (Emergenz)",     act:"ReLU",  n:28, hue:225},
+      {name:"HL 2 (Feldkopplung)", act:"ReLU",  n:22, hue:285},
+      {name:"HL 3 (Resonanz)",     act:"ReLU",  n:37, hue:330},
+      {name:"HL 4 (Feldkoh\u00e4renz)", act:"ReLU", n:22, hue:12},
+      {name:"Ausgang",             act:"Softmax",n:9, hue:32, role:"exec"},
+    ], sat:0.85, lum:0.62 },
+  feedfwd:{ title:"INSIDE AI", sub:"DEEP FEED-FORWARD NET",
+    feed:"LIVE FEED \u2014 FORWARD PASS  ::  loss 0.0417  ::  lr 1e-3  ::  epoch 128  ::  ",
+    layers:[
+      {name:"Input", act:"\u2014",n:12, hue:205, role:"input"},
+      {name:"HL 1",  act:"ReLU",  n:28, hue:200},
+      {name:"HL 2",  act:"ReLU",  n:22, hue:180},
+      {name:"HL 3",  act:"ReLU",  n:37, hue:22},
+      {name:"Output",act:"tanh",  n:8,  hue:8, role:"exec"},
+    ], sat:0.9, lum:0.6 },
+  transformer:{ title:"INSIDE AI BRAIN", sub:"TRANSFORMER ENCODER BLOCK",
+    feed:"LIVE FEED \u2014 AGENT REASONING CHAIN  ::  d_model 512  ::  heads 8  ::  d_k 64  ::  ",
+    layers:[
+      {name:"Embedding",        act:"\u2014",  n:16, hue:175, role:"input"},
+      {name:"MultiHead Attn",   act:"Softmax", n:24, hue:172},
+      {name:"Add & Norm",       act:"skip \u2295", n:16, hue:315},
+      {name:"FFN 512\u21922048\u2192512", act:"GELU", n:32, hue:172},
+      {name:"Add & Norm",       act:"skip \u2295", n:16, hue:315},
+      {name:"Output",           act:"\u2014",  n:12, hue:300, role:"exec"},
+    ], sat:0.85, lum:0.66 },
+};
+
+/* ---- state --------------------------------------------------------------- */
+let skinKey="live", net=null, inputLayer=null;
+let params={wave:0.42,density:0.72,glow:0.34};
+let yaw=-0.5,pitch=0.16,targetYaw=yaw,targetPitch=pitch,zoom=1;
+let autoOrbit=true, demoOn=true, t=0;
+let sideHue=null, sideMix=0;
+const reduced=matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ---- build network ------------------------------------------------------- */
+function buildNet(){
+  const skin=SKINS[skinKey], L=skin.layers.length;
+  const layerGap=150,nodeGap=15;
+  const layers=skin.layers.map((def,i)=>{
+    const x=(i-(L-1)/2)*layerGap, top=-(def.n-1)/2*nodeGap, nodes=[];
+    for(let j=0;j<def.n;j++) nodes.push({x,y:top+j*nodeGap,z:0,charge:0});
+    return {...def,x,nodes};
+  });
+  const edges=[];
+  for(let i=0;i<L-1;i++){const a=layers[i],b=layers[i+1];
+    for(let s=0;s<a.nodes.length;s++)for(let d=0;d<b.nodes.length;d++)
+      edges.push({li:i,a:a.nodes[s],b:b.nodes[d],
+        hue:lerp(a.hue,hueShort(a.hue,b.hue),0.5),
+        ph:Math.random()*6.283,zph:Math.random()*6.283,
+        amp:0.6+Math.random()*0.8,w:Math.random()});}
+  net={skin,layers,edges,nodeGap,charge:new Array(L).fill(0)};
+  inputLayer=layers[0];
+}
+function lerp(a,b,t){return a+(b-a)*t;}
+function hueShort(a,b){let d=((b-a+540)%360)-180;return a+d;}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+
+/* ---- projection ---------------------------------------------------------- */
+const FOCAL=620;
+function project(p){
+  const cy=Math.cos(yaw),sy=Math.sin(yaw),cx=Math.cos(pitch),sx=Math.sin(pitch);
+  const x=p.x,y=p.y,z=p.z;
+  const x1=x*cy+z*sy, z1=-x*sy+z*cy, y1=y*cx-z1*sx, z2=y*sx+z1*cx;
+  const s=FOCAL/(FOCAL+z2)*zoom;
+  return {X:W/2+x1*s,Y:H/2+y1*s,s,z:z2};
+}
+
+/* ---- live signal injection ---------------------------------------------- */
+const symIndex={}; let symCount=0; let activity=0;
+function inputNodeFor(sym){
+  if(!inputLayer) return 0;
+  if(!(sym in symIndex)){ symIndex[sym]=symCount % inputLayer.nodes.length; symCount++; }
+  return symIndex[sym];
+}
+function pulseInput(sym,strength){
+  const C=net.charge; if(!C.length) return;
+  C[0]=Math.min(1.4,C[0]+strength);
+  const nd=inputLayer.nodes[inputNodeFor(sym)]; if(nd) nd.charge=Math.min(1.6,nd.charge+strength*1.2);
+  activity=Math.min(1,activity+0.10);
+}
+function pulseExec(strength){ const C=net.charge; if(C.length) C[C.length-1]=Math.min(1.4,C[C.length-1]+strength);
+  activity=Math.min(1,activity+0.12); }
+function tintSide(side){ sideHue=side==="buy"?150:(side==="sell"?2:null); if(sideHue!=null) sideMix=Math.min(0.5,sideMix+0.18); }
+
+/* ---- render loop --------------------------------------------------------- */
+function frame(){
+  requestAnimationFrame(frame);
+  if(!reduced) t+=0.016;
+  if(autoOrbit&&!dragging) targetYaw+=0.0016;
+  yaw+=(targetYaw-yaw)*0.06; pitch+=(targetPitch-pitch)*0.06;
+
+  const C=net.charge, L=C.length;
+  for(let l=L-1;l>=1;l--) C[l]=C[l]*0.86 + C[l-1]*0.14;
+  C[0]*=0.90;
+  for(const nd of inputLayer.nodes) nd.charge*=0.90;
+  activity*=0.94; sideMix*=0.96;
+  let total=0; for(let l=0;l<L;l++) total+=C[l];
+
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.globalCompositeOperation="source-over"; ctx.fillStyle="#000"; ctx.fillRect(0,0,W,H);
+
+  const skin=net.skin;
+  const live=total>0.02;
+  const waveAmt=(params.wave*26)*(1+activity*1.3);
+  const glowA=0.02+params.glow*0.10;
+  const stride=Math.max(1,Math.round(1/Math.max(0.12,params.density)));
+  const SEG=14;
+
+  ctx.globalCompositeOperation="lighter"; ctx.lineWidth=0.6;
+  const edges=net.edges;
+  for(let e=0;e<edges.length;e+=stride){
+    const ed=edges[e], a=ed.a, b=ed.b;
+    const breathe=0.5+0.5*Math.sin(t*1.4-ed.li*0.9+ed.ph*0.15);
+    const energy=live?(0.25+1.15*C[ed.li]):breathe;
+    const alpha=glowA*(0.35+0.65*ed.w)*(0.5+0.7*energy);
+    const hue=(sideHue!=null)?lerp(ed.hue,sideHue,sideMix*0.6):ed.hue;
+    const light=(skin.lum+0.16*energy)*100;
+    ctx.strokeStyle=`hsla(${hue},${skin.sat*100}%,${clamp(light,10,92)}%,${clamp(alpha,0,0.9)})`;
+    ctx.beginPath();
+    for(let k=0;k<=SEG;k++){
+      const u=k/SEG, env=Math.sin(u*Math.PI);
+      const wy=Math.sin(u*3.14159+ed.ph+t*1.6)*env*waveAmt*ed.amp;
+      const wz=Math.sin(u*2.2+ed.zph+t*0.9)*env*46;
+      const pr=project({x:lerp(a.x,b.x,u),y:lerp(a.y,b.y,u)+wy,z:wz});
+      if(k===0)ctx.moveTo(pr.X,pr.Y);else ctx.lineTo(pr.X,pr.Y);
+    }
+    ctx.stroke();
+  }
+  for(let li=0;li<net.layers.length;li++){
+    const ly=net.layers[li], lc=C[li]||0;
+    for(const nd of ly.nodes){
+      const pr=project(nd);
+      const r=Math.max(0.8,1.7*pr.s)*(0.8+0.7*Math.min(1,nd.charge));
+      const a=clamp(0.5*(0.55+0.5*(nd.charge+lc)),0,0.95);
+      ctx.beginPath();
+      ctx.fillStyle=`hsla(${ly.hue},72%,${clamp(80+18*Math.min(1,nd.charge),80,98)}%,${a})`;
+      ctx.arc(pr.X,pr.Y,r,0,6.2832); ctx.fill();
+    }
+  }
+  ctx.globalCompositeOperation="source-over"; drawLabels();
+}
+
+function drawLabels(){
+  const acc=getComputedStyle(document.documentElement).getPropertyValue("--accent").trim()||"#ff4d5e";
+  for(const ly of net.layers){
+    const top=ly.nodes[0];
+    const pr=project({x:top.x,y:top.y-net.nodeGap*1.6,z:0});
+    if(pr.s<0.25) continue;
+    const S=clamp(pr.s,.7,1.3), x=pr.X, y=pr.Y;
+    ctx.textAlign="left";
+    ctx.font=`700 ${Math.round(12*S)}px ui-monospace,"JetBrains Mono",Consolas,monospace`;
+    ctx.fillStyle="rgba(232,237,246,0.92)"; ctx.fillText(ly.name,x,y);
+    ctx.font=`500 ${Math.round(10*S)}px ui-monospace,"JetBrains Mono",Consolas,monospace`;
+    ctx.fillStyle="rgba(125,138,163,0.9)"; ctx.fillText(`Nodes: ${ly.n}`,x,y+14);
+    ctx.fillStyle=acc; ctx.fillText(`[${ly.act}]`,x,y+27);
+  }
+}
+
+/* ---- WebSocket ingestion ------------------------------------------------- */
+let ws=null, wsWant=false, reconnTimer=null, connected=false;
+let evWindow=[]; const recent=[];
+function setStatus(){
+  document.getElementById("pill").classList.toggle("on",connected);
+  document.getElementById("feedBar").classList.toggle("on",connected);
+  document.getElementById("pillText").textContent=connected?"LIVE":"DEMO";
+}
+function bumpRate(){ const now=performance.now(); evWindow.push(now);
+  while(evWindow.length&&now-evWindow[0]>1000) evWindow.shift();
+  document.getElementById("pillRate").textContent=connected?`${evWindow.length}/s`:""; }
+function connectWS(url){
+  wsWant=true; try{ ws&&ws.close(); }catch(e){}
+  try{ ws=new WebSocket(url); }catch(e){ scheduleReconnect(url); return; }
+  ws.onopen=()=>{ connected=true; recent.length=0; setStatus();
+    document.getElementById("connect").textContent="Disconnect"; };
+  ws.onclose=()=>{ connected=false; setStatus();
+    document.getElementById("connect").textContent="Connect"; if(wsWant) scheduleReconnect(url); };
+  ws.onerror=()=>{ try{ws.close();}catch(e){} };
+  ws.onmessage=ev=>{ try{ handleEvent(JSON.parse(ev.data)); }catch(e){} };
+}
+function scheduleReconnect(url){ clearTimeout(reconnTimer); if(wsWant) reconnTimer=setTimeout(()=>connectWS(url),2000); }
+function disconnectWS(){ wsWant=false; clearTimeout(reconnTimer); try{ws&&ws.close();}catch(e){}
+  connected=false; setStatus(); document.getElementById("connect").textContent="Connect"; }
+
+function handleEvent(m){
+  bumpRate(); const kind=m.t;
+  if(kind==="meta"){ applyMeta(m); return; }
+  if(kind==="quote"){ pulseInput(m.root||m.sym||"?",0.35);
+    pushFeed(`${m.root||m.sym}  bid ${fmt(m.bid)} / ask ${fmt(m.ask)}`); }
+  else if(kind==="trade"){ pulseInput(m.root||m.sym||"?",0.6); tintSide(m.side);
+    pushFeed(`${m.root||m.sym}  ${(m.side||"").toUpperCase()}  ${fmt(m.px)} \u00d7 ${fmt(m.qty)}`); }
+  else if(kind==="bar"){ pulseInput(m.root||m.sym||"?",0.5);
+    pushFeed(`${m.root||m.sym}  bar C ${fmt(m.close)}  V ${fmt(m.volume)}`); }
+  else if(kind==="order"){ pulseExec(0.8); pushFeed(`ORDER ${m.kind||""} ${m.root||m.sym||""}`); }
+  else if(kind==="position"){ pulseExec(0.7); pushFeed(`POSITION ${m.kind||""} ${m.root||m.sym||""}`); }
+  else if(kind==="signal"){ pulseInput(m.sym||"sig",0.5); pushFeed(`SIGNAL ${m.name||""} ${fmt(m.value)}`); }
+}
+function applyMeta(m){
+  if(Array.isArray(m.instruments)&&inputLayer){
+    m.instruments.slice(0,inputLayer.nodes.length).forEach((s,i)=>{ symIndex[s]=i; });
+    symCount=Math.max(symCount,m.instruments.length);
+  }
+  if(m.venue) SKINS.live.sub=`LIVE \u00b7 ${String(m.venue).toUpperCase()}`;
+}
+function fmt(v){ if(v==null||v==="")return "\u2014"; const n=+v; if(!isFinite(n))return String(v);
+  return Math.abs(n)>=1000?n.toFixed(0):Math.abs(n)>=1?n.toFixed(2):n.toPrecision(4); }
+function pushFeed(s){ recent.unshift(s); if(recent.length>24) recent.pop(); }
+
+/* ---- demo feed ----------------------------------------------------------- */
+const DEMO_SYMS=["BTCUSDT","ETHUSDT","ESZ24","NQZ24","AAPL","EURUSD"];
+function demoTick(){
+  if(connected||!demoOn) return;
+  const s=DEMO_SYMS[(Math.random()*DEMO_SYMS.length)|0], r=Math.random();
+  if(r<0.6){ handleEvent({t:"trade",root:s,side:Math.random()<0.5?"buy":"sell",
+    px:(Math.random()*100+10),qty:(Math.random()*5).toFixed(2)}); }
+  else if(r<0.9){ const b=Math.random()*100+10; handleEvent({t:"quote",root:s,bid:b,ask:b+0.05}); }
+  else { handleEvent({t:"order",kind:Math.random()<0.5?"Submitted":"Filled",root:s}); }
+}
+
+/* ---- ticker -------------------------------------------------------------- */
+const feedEl=document.getElementById("feed");
+let feedX=0, feedW=0;
+function rebuildTicker(){
+  let text = (connected&&recent.length)? recent.join("   ::   ")+"   ::   " : (SKINS[skinKey].feed||"").repeat(2);
+  feedEl.textContent=(text+" ").repeat(3);
+  feedW=feedEl.scrollWidth/3||0;
+}
+setInterval(rebuildTicker,600);
+(function tick(){ requestAnimationFrame(tick);
+  if(!reduced&&feedW){ feedX-=0.6; if(-feedX>feedW) feedX+=feedW; feedEl.style.transform=`translateX(${feedX}px)`; }
+})();
+
+/* ---- interaction --------------------------------------------------------- */
+let dragging=false,lastX=0,lastY=0;
+function down(x,y){dragging=true;lastX=x;lastY=y;cv.classList.add("drag");}
+function move(x,y){if(!dragging)return;targetYaw+=(x-lastX)*0.006;targetPitch=clamp(targetPitch+(y-lastY)*0.006,-1.2,1.2);lastX=x;lastY=y;}
+function up(){dragging=false;cv.classList.remove("drag");}
+cv.addEventListener("mousedown",e=>down(e.clientX,e.clientY));
+addEventListener("mousemove",e=>move(e.clientX,e.clientY));
+addEventListener("mouseup",up);
+cv.addEventListener("touchstart",e=>{const p=e.touches[0];down(p.clientX,p.clientY);},{passive:true});
+cv.addEventListener("touchmove",e=>{const p=e.touches[0];move(p.clientX,p.clientY);},{passive:true});
+cv.addEventListener("touchend",up);
+cv.addEventListener("wheel",e=>{e.preventDefault();zoom=clamp(zoom*(e.deltaY>0?0.93:1.07),0.4,3);},{passive:false});
+addEventListener("keydown",e=>{ if(e.key==="r"||e.key==="R")buildNet();
+  if(e.code==="Space"){e.preventDefault();toggleOrbit();} });
+
+/* ---- UI wiring ----------------------------------------------------------- */
+const $=s=>document.querySelector(s);
+function setSkin(k){ skinKey=k; buildNet(); const s=SKINS[k];
+  $("#title").firstChild.textContent=s.title+"\u00A0"; $("#subtitle").textContent=s.sub;
+  document.querySelectorAll("#skin button").forEach(b=>b.classList.toggle("on",b.dataset.v===k));
+  rebuildTicker(); }
+document.querySelectorAll("#skin button").forEach(b=>b.addEventListener("click",()=>setSkin(b.dataset.v)));
+$("#wave").addEventListener("input",e=>params.wave=e.target.value/100);
+$("#density").addEventListener("input",e=>params.density=e.target.value/100);
+$("#glow").addEventListener("input",e=>params.glow=e.target.value/100);
+$("#regen").addEventListener("click",()=>buildNet());
+$("#connect").addEventListener("click",()=>{ if(connected||wsWant){disconnectWS();} else{ connectWS($("#wsurl").value.trim()); } });
+$("#wsurl").addEventListener("keydown",e=>{ if(e.key==="Enter"){ disconnectWS(); connectWS(e.target.value.trim()); } });
+function toggleOrbit(){autoOrbit=!autoOrbit;$("#orbit").textContent=autoOrbit?"Auto-orbit \u25cf":"Auto-orbit \u25cb";}
+$("#orbit").addEventListener("click",toggleOrbit);
+$("#demo").addEventListener("click",()=>{demoOn=!demoOn;$("#demo").textContent=demoOn?"Demo feed \u25cf":"Demo feed \u25cb";});
+$("#collapse").addEventListener("click",()=>{const c=$("#controls");c.classList.toggle("collapsed");
+  $("#collapse").textContent=c.classList.contains("collapsed")?"+":"\u2013";});
+
+/* ---- boot ---------------------------------------------------------------- */
+const qs=new URLSearchParams(location.search);
+if(qs.get("ws")) $("#wsurl").value=qs.get("ws");
+setSkin("live"); setStatus();
+setInterval(demoTick,320);
+if(qs.get("ws")||qs.get("autoconnect")) connectWS($("#wsurl").value.trim());
+frame();
+</script>
+</body>
+</html>
